@@ -31,7 +31,6 @@
     .card { background:var(--card); border-radius:18px; padding:16px 16px 14px;
       box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 1px rgba(255,255,255,.05); min-height:200px; }
 
-    /* gentle page transition */
     .grid.fade-out { opacity:0; transform: translateY(8px); transition: opacity .35s ease, transform .35s ease; }
     .grid.fade-in  { opacity:1; transform: translateY(0);  transition: opacity .35s ease, transform .35s ease; }
 
@@ -127,7 +126,7 @@
         return new Date(yyyy, (+m[1])-1, (+m[2]));
       }
 
-      // 4) MM/DD  (assume current year)  <-- handles tournament lines like "08/23"
+      // 4) MM/DD  (assume current year)
       m = /^(\d{2})\/(\d{2})$/.exec(t);
       if (m) {
         const yyyy = new Date().getFullYear();
@@ -156,7 +155,7 @@
       return { last, next };
     }
 
-    // Compute your team’s record from its own W/L results (not opponent W-L).
+    // compute team's record from its own W/L results (completed games up to today)
     function currentRecord(rows){
       const today = new Date(); today.setHours(0,0,0,0);
 
@@ -179,7 +178,7 @@
       }
       if (w + l + t > 0) return t ? `${w}-${l}-${t}` : `${w}-${l}`;
 
-      // fallback: some captions include "(3-3)"
+      // fallback: sometimes caption includes "(3-3)"
       const disp = (items[0]?.r?._team_display) || (rows[0]?._team_display) || "";
       const m = /\((\d+)-(\d+)(?:-(\d+))?\)/.exec(disp);
       if (m) return m[3] ? `${m[1]}-${m[2]}-${m[3]}` : `${m[1]}-${m[2]}`;
@@ -187,18 +186,17 @@
       return "0-0";
     }
 
-    // softball: derive an event line (Opponent or Tournament)
-    function eventLine(r){
+    /* ---------- opponent/event helpers for compact view ---------- */
+    function opponentText(r){
       const opp = (r.Opponent||"").trim();
-      if (opp && !/^\(to be determined\)$/i.test(opp) && !/^opponents:$/i.test(opp)) {
-        return opp;
-      }
-      if (r["Tournament Name"] && r["Tournament Name"] !== "-") return r["Tournament Name"];
-      return "TBD";
+      if (!opp) return null;
+      if (/^\(to be determined\)$/i.test(opp)) return null;
+      if (/^opponents?:?$/i.test(opp)) return null;
+      return opp;
     }
-    function locationLine(r){
-      const loc = (r["Tournament Location"]||"").trim();
-      return (loc && loc !== "-") ? loc : null;
+    function tournamentText(r){
+      const t = (r["Tournament Name"]||"").trim();
+      return (t && t !== "-") ? t : null;
     }
 
     // ---- card renderers ----
@@ -210,18 +208,24 @@
       const team = rowAny._team || "Unknown";
       const cls  = rowAny._class || "?";
 
+      const lastOpp = rowLast ? opponentText(rowLast) : null;
+      const lastEvt = rowLast ? tournamentText(rowLast) : null;
+
       const lastBlock = rowLast ? (
         line("Date", rowLast.Date) +
-        line("Event", eventLine(rowLast)) +
-        (locationLine(rowLast) ? line("Location", locationLine(rowLast)) : "") +
+        (lastOpp ? line("Opponent", lastOpp) : "") +
+        (lastEvt ? line("Event", lastEvt) : "") +
         line("Score", rowLast.Score || "-") +
         line("W/L", rowLast["W/L"] || "-")
       ) : `<div class="sub">—</div><div class="sub">No results yet.</div>`;
 
+      const nextOpp = rowNext ? opponentText(rowNext) : null;
+      const nextEvt = rowNext ? tournamentText(rowNext) : null;
+
       const nextBlock = rowNext ? (
         line("Date", rowNext.Date) +
-        line("Event", eventLine(rowNext)) +
-        (locationLine(rowNext) ? line("Location", locationLine(rowNext)) : "")
+        (nextOpp ? line("Opponent", nextOpp) : "") +
+        (nextEvt ? line("Event", nextEvt) : "")
       ) : `<div class="sub">—</div><div class="sub">No future games scheduled.</div>`;
 
       const div = document.createElement("div");
