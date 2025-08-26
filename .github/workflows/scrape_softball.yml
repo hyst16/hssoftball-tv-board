@@ -1,0 +1,44 @@
+name: Scrape NSAA Softball -> Build JSON
+
+on:
+  schedule:
+    - cron: "20 11 * * *"   # ~06:20 America/Chicago; GitHub uses UTC
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run scraper
+        run: |
+          python scraper/scrape_nsaa_softball.py
+          test -f data/softball.json
+
+      - name: Commit & push if changed
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/softball.json
+            git commit -m "chore(softball): update softball.json ($(date -u +'%Y-%m-%d %H:%M:%SZ'))"
+            git push
+          else
+            echo "No changes."
+          fi
