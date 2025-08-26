@@ -1,5 +1,4 @@
 
-```python
 #!/usr/bin/env python3
 """
 Scrape NSAA softball class pages (A/B/C) and build data/softball.json
@@ -183,4 +182,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
