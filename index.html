@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Local HS Softball</title>
+  <meta http-equiv="refresh" content="600">
+  <style>
+    :root {
+      --bg:#0b0e13; --card:#121722; --ink:#e7edf6; --muted:#9fb0c2; --accent:#4fd1c5; --warn:#f59e0b;
+      --card-min:320px;
+    }
+    html, body { height:100%; margin:0; background:var(--bg); color:var(--ink);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    .wrap { display:flex; flex-direction:column; min-height:100%; }
+
+    header { padding:20px 28px 8px; display:grid; grid-template-columns:1fr auto; align-items:end; gap:14px; }
+    .title { font-weight:800; letter-spacing:.3px; font-size:32px; grid-column:1 / 2; }
+    .clock { color:var(--muted); font-size:14px; grid-column:2 / 3; justify-self:end; }
+
+    .progress-wrap { grid-column:1 / 2; width:min(420px, 60vw); height:6px;
+      background:rgba(255,255,255,.08); border-radius:999px; overflow:hidden; }
+    .progress { height:100%; width:0%; background:var(--accent); }
+    @keyframes rotProgress { from { width:0% } to { width:100% } }
+
+    .grid { display:grid; gap:16px; padding:8px 28px 28px;
+      grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr)); }
+    .card { background:var(--card); border-radius:18px; padding:16px 16px 14px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 1px rgba(255,255,255,.05); min-height:200px; }
+    .grid.fade-out { opacity:0; transform: translateY(8px); transition: opacity .35s ease, transform .35s ease; }
+    .grid.fade-in  { opacity:1; transform: translateY(0);  transition: opacity .35s ease, transform .35s ease; }
+
+    .team { font-size:22px; font-weight:800; margin:4px 0 2px; }
+    .sub { font-size:13px; color:var(--muted); margin:6px 0 8px; }
+    .section { margin-top:8px; font-weight:700; font-size:13px; color:var(--muted); }
+    .rowline { display:flex; gap:10px; align-items:baseline; }
+    .label { color:var(--muted); font-weight:600; font-size:12px; width:86px; flex:0 0 auto; }
+    .value { font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    .table { width:100%; border-collapse:collapse; font-size:14px; }
+    .table th, .table td { padding:6px 0; border-bottom:1px solid rgba(255,255,255,.06); }
+    .table th { text-align:left; color:var(--muted); font-weight:600; font-size:12px; letter-spacing:.3px; }
+
+    footer { text-align:center; color:var(--muted); font-size:12px; padding:8px 0 16px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="title">Local HS Softball</div>
+      <div class="clock" id="clock">--:--</div>
+      <div class="progress-wrap" id="progWrap">
+        <div class="progress" id="progress"></div>
+      </div>
+    </header>
+
+    <div class="grid" id="grid"></div>
+
+    <footer>
+      Data scraped daily from NSAA class pages. Updated <span id="updated">…</span>.
+    </footer>
+  </div>
+
+  <script>
+    // -------- URL params --------
+    const p = new URLSearchParams(location.search);
+    const office   = p.get("office")  || "mead-office";
+    const perPage  = Math.max(1, parseInt(p.get("per") || "2", 10));
+    const rotateS  = Math.max(5, parseInt(p.get("rotate") || "20", 10));
+    const mode     = (p.get("mode") || "compact").toLowerCase();      // "compact" | "full"
+    const cardMin  = parseInt(p.get("cardmin") || "0", 10);
+    const anim     = (p.get("anim") || "on").toLowerCase() !== "off";
+
+    if (!Number.isNaN(cardMin) && cardMin > 150) {
+      document.documentElement.style.setProperty('--card-min', cardMin + 'px');
+    }
+
+    const elGrid    = document.getElementById("grid");
+    const elUpdated = document.getElementById("updated");
+    const elClock   = document.getElementById("clock");
+    const elProgW   = document.getElementById("progWrap");
+    const elProg    = document.getElementById("progress");
+    elProgW.style.display = "none";
+
+    // -------- clock --------
+    function startClock(){
+      function tick(){
+        const d = new Date();
+        elClock.textContent = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+      }
+      tick(); setInterval(tick, 15000);
+    }
+
+    // -------- utils --------
+    function norm(s){ return (s||"").toLowerCase().replace(/[^a-z0-9]+/g,""); }
+    async function loadJSON(url){ const r = await fetch(url, {cache:"no-cache"}); if(!r.ok) throw new Error(url); return r.json(); }
+    const chunk = (arr, size) => arr.reduce((a,_,i)=> (i%size? a[a.length-1].push(arr[i]) : a.push([arr[i]]), a), []);
+
+    // ---- date & result helpers ----
+    function parseDateMMDDYYorRange(s){
+      const t = (s||"").trim();
+      // 1) MM/DD/YY
+      let m = /^(\d{2})\/(\d{2})\/(\d{2})$/.exec(t);
+      if (m) {
+        const yyyy = (+m[3] < 70) ? 2000 + (+m[3]) : 1900 + (+m[3]);
+        return new Date(yyyy, (+m[1])-1, (+m[2]));
+      }
+      // 2) MM/DD-MM/DD/YY  (year at end)
+      m = /^(\d{2})\/(\d{2})-(\d{2})\/(\d{2})\/(\d{2})$/.exec(t);
+      if (m) {
+        const yyyy = (+m[5] < 70) ? 2000 + (+m[5]) : 1900 + (+m[5]);
+        return new Date(yyyy, (+m[1])-1, (+m[2])); // start day
+      }
+      // 3) MM/DD-MM/DD  (assume current year)
+      m = /^(\d{2})\/(\d{2})-(\d{2})\/(\d{2})$/.exec(t);
+      if (m) {
+        const yyyy = new Date().getFullYear();
+        return new Date(yyyy, (+m[1])-1, (+m[2]));
+      }
+      return null;
+    }
+
+    function isCompleted(row){
+      const score = String(row.Score||"").trim();
+      const wl    = String(row["W/L"]||"").trim().toUpperCase();
+      if (/\d/.test(score)) return true;
+      if (wl === "W" || wl === "L" || wl === "T") return true;
+      return false;
+    }
+
+    // choose last completed & next upcoming
+    function splitLastAndNext(rows){
+      const items = rows.map(r => ({ r, d: parseDateMMDDYYorRange(r.Date), done: isCompleted(r) }))
+                        .filter(x => x.d && !isNaN(x.d)).sort((a,b)=> a.d - b.d);
+      const today = new Date(); today.setHours(0,0,0,0);
+      const pastDone = items.filter(x => x.done && x.d <= today);
+      const last = pastDone.length ? pastDone[pastDone.length-1].r : null;
+      const next = (items.find(x => !x.done && x.d >= today) || {}).r || null;
+      if (!last) { const anyDone = items.filter(x => x.done); if (anyDone.length) return { last:anyDone[anyDone.length-1].r, next }; }
+      return { last, next };
+    }
+
+    function currentRecord(rows){
+      const today = new Date(); today.setHours(0,0,0,0);
+      const items = rows.map(r => ({ r, d: parseDateMMDDYYorRange(r.Date), done: isCompleted(r) }))
+                        .filter(x => x.d && !isNaN(x.d)).sort((a,b)=> a.d - b.d);
+      const pastDone = items.filter(x => x.done && x.d <= today);
+      let rec = pastDone.length ? String(pastDone[pastDone.length-1].r["W-L"]||"").trim() : "";
+      if (!rec) rec = String((items[0]?.r["W-L"]) || "").trim();
+      if (!rec || rec === "-") rec = "0-0";
+      return rec;
+    }
+
+    // softball: derive an event line (Opponent or Tournament)
+    function eventLine(r){
+      const opp = (r.Opponent||"").trim();
+      if (opp && !/^\(to be determined\)$/i.test(opp) && !/^opponents:$/i.test(opp)) {
+        return opp;
+      }
+      if (r["Tournament Name"] && r["Tournament Name"] !== "-") return r["Tournament Name"];
+      return "TBD";
+    }
+    function locationLine(r){
+      const loc = (r["Tournament Location"]||"").trim();
+      return (loc && loc !== "-") ? loc : null;
+    }
+
+    // ---- card renderers ----
+    function line(label, value){
+      return `<div class="rowline"><div class="label">${label}</div><div class="value">${value ?? "-"}</div></div>`;
+    }
+    function buildCardCompact(rowLast, rowNext, record){
+      const rowAny = rowLast || rowNext || {};
+      const team = rowAny._team || "Unknown";
+      const cls  = rowAny._class || "?";
+
+      const lastBlock = rowLast ? (
+        line("Date", rowLast.Date) +
+        line("Event", eventLine(rowLast)) +
+        (locationLine(rowLast) ? line("Location", locationLine(rowLast)) : "") +
+        line("Score", rowLast.Score || "-") +
+        line("W/L", rowLast["W/L"] || "-")
+      ) : `<div class="sub">—</div><div class="sub">No results yet.</div>`;
+
+      const nextBlock = rowNext ? (
+        line("Date", rowNext.Date) +
+        line("Event", eventLine(rowNext)) +
+        (locationLine(rowNext) ? line("Location", locationLine(rowNext)) : "")
+      ) : `<div class="sub">—</div><div class="sub">No future games scheduled.</div>`;
+
+      const div = document.createElement("div");
+      div.className = "card";
+      div.innerHTML = `
+        <div class="team">${team}</div>
+        <div class="sub">Class ${cls} · Record ${record}</div>
+
+        <div class="section">Last Game</div>
+        ${lastBlock}
+        <div class="section" style="margin-top:10px;">Next Game</div>
+        ${nextBlock}
+      `;
+      return div;
+    }
+
+    function buildCardFull(rowLast, rowNext, record){
+      const rowAny = rowLast || rowNext || {};
+      const team = rowAny._team || "Unknown";
+      const cls  = rowAny._class || "?";
+
+      function rowTable(r){
+        if(!r) return '<div class="sub">—</div>';
+        const order = ["Date","Opponent","Tournament Name","Tournament Location","Class","W-L","W/L","Score","Site","Time","Home/Away"];
+        const keys = order.filter(k => Object.prototype.hasOwnProperty.call(r,k));
+        const rowsHtml = keys.map(k => `<tr><th>${k}</th><td>${r[k]}</td></tr>`).join("");
+        return `<table class="table">${rowsHtml}</table>`;
+      }
+
+      const div = document.createElement("div");
+      div.className = "card";
+      div.innerHTML = `
+        <div class="team">${team}</div>
+        <div class="sub">Class ${cls} · Record ${record}</div>
+        <div class="sub" style="margin-top:12px;font-weight:600;">Last Game</div>
+        ${rowTable(rowLast)} ${!rowLast ? `<div class="sub">No results yet.</div>` : ""}
+        <div class="sub" style="margin-top:12px;font-weight:600;">Next Game</div>
+        ${rowTable(rowNext)} ${!rowNext ? `<div class="sub">No future games scheduled.</div>` : ""}
+      `;
+      return div;
+    }
+
+    // ---- boot & rotation (progress under title) ----
+    (async function init(){
+      startClock();
+      const [teamsCfg, data] = await Promise.all([
+        loadJSON("./teams.json"),
+        loadJSON("./data/softball.json").catch(()=>({updated:0, by_team:{}}))
+      ]);
+      elUpdated.textContent = data.updated ? new Date(data.updated*1000).toLocaleString() : "(no data yet)";
+
+      const wanted = (teamsCfg[office] || []).map(t => ({ name: t, key: norm(t) }));
+      if(!wanted.length){
+        elGrid.innerHTML = `<div class="sub" style="padding:0 28px">Add teams for "${office}" in <code>teams.json</code>.</div>`;
+        return;
+      }
+
+      const pages = chunk(wanted, perPage);
+      let pageIdx = 0;
+
+      function renderPage(){
+        if (anim) { elGrid.classList.remove('fade-in'); elGrid.classList.add('fade-out'); }
+        setTimeout(() => {
+          elGrid.innerHTML = "";
+          for(const {name, key} of pages[pageIdx] || []){
+            const rows = (data.by_team && data.by_team[key]) || [];
+            if(!rows.length){
+              const card = document.createElement("div");
+              card.className = "card";
+              card.innerHTML = `
+                <div class="team">${name}</div>
+                <div class="sub">No match found yet. Ensure name matches NSAA caption (without record).</div>
+              `;
+              elGrid.appendChild(card);
+            } else {
+              const pick = splitLastAndNext(rows);
+              const rec  = currentRecord(rows);
+              const card = (mode === "full")
+                ? buildCardFull(pick.last, pick.next, rec)
+                : buildCardCompact(pick.last, pick.next, rec);
+              elGrid.appendChild(card);
+            }
+          }
+          if (anim) { elGrid.classList.remove('fade-out'); elGrid.classList.add('fade-in'); }
+        }, anim ? 350 : 0);
+      }
+
+      function startProgress(){
+        if (pages.length <= 1){ elProgW.style.display = "none"; return; }
+        elProgW.style.display = "block";
+        elProg.style.animation = "none";
+        void elProg.offsetWidth; // restart
+        elProg.style.backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--accent');
+        elProg.style.animation = `rotProgress ${rotateS}s linear forwards`;
+        setTimeout(() => { elProg.style.backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--warn'); }, Math.max(0, (rotateS*1000)-1500));
+      }
+
+      function scheduleNext(){
+        startProgress();
+        setTimeout(() => {
+          pageIdx = (pageIdx + 1) % pages.length;
+          renderPage();
+          scheduleNext();
+        }, rotateS * 1000);
+      }
+
+      renderPage();
+      if (pages.length > 1) scheduleNext();
+    })();
+  </script>
+</body>
+</html>
