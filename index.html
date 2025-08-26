@@ -4,11 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Local HS Softball</title>
+  <!-- TV auto-refresh every 10 minutes -->
   <meta http-equiv="refresh" content="600">
+
   <style>
     :root {
       --bg:#0b0e13; --card:#121722; --ink:#e7edf6; --muted:#9fb0c2; --accent:#4fd1c5; --warn:#f59e0b;
-      --card-min:320px;
+      --card-min:320px; /* override with ?cardmin=300 */
     }
     html, body { height:100%; margin:0; background:var(--bg); color:var(--ink);
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
@@ -18,15 +20,18 @@
     .title { font-weight:800; letter-spacing:.3px; font-size:32px; grid-column:1 / 2; }
     .clock { color:var(--muted); font-size:14px; grid-column:2 / 3; justify-self:end; }
 
+    /* progress bar under title, left-aligned */
     .progress-wrap { grid-column:1 / 2; width:min(420px, 60vw); height:6px;
       background:rgba(255,255,255,.08); border-radius:999px; overflow:hidden; }
     .progress { height:100%; width:0%; background:var(--accent); }
     @keyframes rotProgress { from { width:0% } to { width:100% } }
 
-    .grid { display:grid; gap:16px; padding:8px 28px 28px;
+    .grid { display:grid; gap:16px 16px; padding:8px 28px 28px;
       grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr)); }
     .card { background:var(--card); border-radius:18px; padding:16px 16px 14px;
       box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 1px rgba(255,255,255,.05); min-height:200px; }
+
+    /* gentle page transition */
     .grid.fade-out { opacity:0; transform: translateY(8px); transition: opacity .35s ease, transform .35s ease; }
     .grid.fade-in  { opacity:1; transform: translateY(0);  transition: opacity .35s ease, transform .35s ease; }
 
@@ -49,7 +54,7 @@
     <header>
       <div class="title">Local HS Softball</div>
       <div class="clock" id="clock">--:--</div>
-      <div class="progress-wrap" id="progWrap">
+      <div class="progress-wrap" id="progWrap" title="Time until next page">
         <div class="progress" id="progress"></div>
       </div>
     </header>
@@ -65,11 +70,11 @@
     // -------- URL params --------
     const p = new URLSearchParams(location.search);
     const office   = p.get("office")  || "mead-office";
-    const perPage  = Math.max(1, parseInt(p.get("per") || "2", 10));
-    const rotateS  = Math.max(5, parseInt(p.get("rotate") || "20", 10));
-    const mode     = (p.get("mode") || "compact").toLowerCase();      // "compact" | "full"
-    const cardMin  = parseInt(p.get("cardmin") || "0", 10);
-    const anim     = (p.get("anim") || "on").toLowerCase() !== "off";
+    const perPage  = Math.max(1, parseInt(p.get("per") || "2", 10));     // cards per page
+    const rotateS  = Math.max(5, parseInt(p.get("rotate") || "20", 10)); // seconds per page
+    const mode     = (p.get("mode") || "compact").toLowerCase();         // "compact" | "full"
+    const cardMin  = parseInt(p.get("cardmin") || "0", 10);              // e.g., &cardmin=300
+    const anim     = (p.get("anim") || "on").toLowerCase() !== "off";    // &anim=off disables fades
 
     if (!Number.isNaN(cardMin) && cardMin > 150) {
       document.documentElement.style.setProperty('--card-min', cardMin + 'px');
@@ -99,24 +104,36 @@
     // ---- date & result helpers ----
     function parseDateMMDDYYorRange(s){
       const t = (s||"").trim();
+      let m;
+
       // 1) MM/DD/YY
-      let m = /^(\d{2})\/(\d{2})\/(\d{2})$/.exec(t);
+      m = /^(\d{2})\/(\d{2})\/(\d{2})$/.exec(t);
       if (m) {
         const yyyy = (+m[3] < 70) ? 2000 + (+m[3]) : 1900 + (+m[3]);
         return new Date(yyyy, (+m[1])-1, (+m[2]));
       }
-      // 2) MM/DD-MM/DD/YY  (year at end)
+
+      // 2) MM/DD-MM/DD/YY  (year at end; use start date)
       m = /^(\d{2})\/(\d{2})-(\d{2})\/(\d{2})\/(\d{2})$/.exec(t);
       if (m) {
         const yyyy = (+m[5] < 70) ? 2000 + (+m[5]) : 1900 + (+m[5]);
-        return new Date(yyyy, (+m[1])-1, (+m[2])); // start day
+        return new Date(yyyy, (+m[1])-1, (+m[2]));
       }
-      // 3) MM/DD-MM/DD  (assume current year)
+
+      // 3) MM/DD-MM/DD  (assume current year; use start date)
       m = /^(\d{2})\/(\d{2})-(\d{2})\/(\d{2})$/.exec(t);
       if (m) {
         const yyyy = new Date().getFullYear();
         return new Date(yyyy, (+m[1])-1, (+m[2]));
       }
+
+      // 4) MM/DD  (assume current year)  <-- handles tournament lines like "08/23"
+      m = /^(\d{2})\/(\d{2})$/.exec(t);
+      if (m) {
+        const yyyy = new Date().getFullYear();
+        return new Date(yyyy, (+m[1])-1, (+m[2]));
+      }
+
       return null;
     }
 
@@ -128,7 +145,6 @@
       return false;
     }
 
-    // choose last completed & next upcoming
     function splitLastAndNext(rows){
       const items = rows.map(r => ({ r, d: parseDateMMDDYYorRange(r.Date), done: isCompleted(r) }))
                         .filter(x => x.d && !isNaN(x.d)).sort((a,b)=> a.d - b.d);
@@ -140,15 +156,35 @@
       return { last, next };
     }
 
+    // Compute your team’s record from its own W/L results (not opponent W-L).
     function currentRecord(rows){
       const today = new Date(); today.setHours(0,0,0,0);
-      const items = rows.map(r => ({ r, d: parseDateMMDDYYorRange(r.Date), done: isCompleted(r) }))
-                        .filter(x => x.d && !isNaN(x.d)).sort((a,b)=> a.d - b.d);
-      const pastDone = items.filter(x => x.done && x.d <= today);
-      let rec = pastDone.length ? String(pastDone[pastDone.length-1].r["W-L"]||"").trim() : "";
-      if (!rec) rec = String((items[0]?.r["W-L"]) || "").trim();
-      if (!rec || rec === "-") rec = "0-0";
-      return rec;
+
+      const items = rows.map(r => ({
+          r,
+          d: parseDateMMDDYYorRange(r.Date),
+          done: isCompleted(r)
+        }))
+        .filter(x => x.d && !isNaN(x.d))
+        .sort((a,b) => a.d - b.d);
+
+      const completed = items.filter(x => x.done && x.d <= today).map(x => x.r);
+
+      let w = 0, l = 0, t = 0;
+      for (const r of completed) {
+        const res = String(r["W/L"] || "").trim().toUpperCase();
+        if (res === "W") w++;
+        else if (res === "L") l++;
+        else if (res === "T") t++;
+      }
+      if (w + l + t > 0) return t ? `${w}-${l}-${t}` : `${w}-${l}`;
+
+      // fallback: some captions include "(3-3)"
+      const disp = (items[0]?.r?._team_display) || (rows[0]?._team_display) || "";
+      const m = /\((\d+)-(\d+)(?:-(\d+))?\)/.exec(disp);
+      if (m) return m[3] ? `${m[1]}-${m[2]}-${m[3]}` : `${m[1]}-${m[2]}`;
+
+      return "0-0";
     }
 
     // softball: derive an event line (Opponent or Tournament)
@@ -228,7 +264,7 @@
       return div;
     }
 
-    // ---- boot & rotation (progress under title) ----
+    // ---- boot & rotation ----
     (async function init(){
       startClock();
       const [teamsCfg, data] = await Promise.all([
@@ -250,7 +286,8 @@
         if (anim) { elGrid.classList.remove('fade-in'); elGrid.classList.add('fade-out'); }
         setTimeout(() => {
           elGrid.innerHTML = "";
-          for(const {name, key} of pages[pageIdx] || []){
+          const slice = pages[pageIdx] || [];
+          for(const {name, key} of slice){
             const rows = (data.by_team && data.by_team[key]) || [];
             if(!rows.length){
               const card = document.createElement("div");
