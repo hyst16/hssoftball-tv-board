@@ -35,8 +35,8 @@ Use the links to open each office directly:
   - Twin River
 
 - [yanka-office](https://hyst16.github.io/hssoftball-tv-board/?office=yanka-office)
-  - Aquinas Catholic
   - Blue River
+  - Polk County-Aquinas
 
 <!-- offices-end -->
 
