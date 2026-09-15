@@ -1,6 +1,21 @@
 {
-  "mead-office": ["Bishop Neumann", "Wahoo", "Yutan/Mead"],
-  "yanka-office": ["Aquinas Catholic", "Blue River"],
-  "northbend-office":["North Bend Central", "Arlington", "Logan View/Scribner-Snyder"],
-  "tarnov-office": ["Columbus", "Columbus Lakeview", "Twin River"]
+  "mead-office": [
+    "Bishop Neumann",
+    "Wahoo",
+    "Yutan/Mead"
+  ],
+  "yanka-office": [
+    "Blue River",
+    "Polk County-Aquinas"
+  ],
+  "northbend-office": [
+    "North Bend Central",
+    "Arlington",
+    "Logan View/Scribner-Snyder"
+  ],
+  "tarnov-office": [
+    "Columbus",
+    "Columbus Lakeview",
+    "Twin River"
+  ]
 }
