@@ -1,6 +1,9 @@
-name: Scrape NSAA Softball -> Build JSON
+name: Update Softball Schedules and README
 
 on:
+  push:
+    paths:
+      - teams.json
   schedule:
     - cron: "20 11 * * *"   # ~06:20 America/Chicago; GitHub uses UTC
   workflow_dispatch:
@@ -26,9 +29,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run scraper
+      - name: Update schedules and README
         run: |
           python scraper/scrape_nsaa_softball.py
+          python update_readme.py
           test -f data/softball.json
 
       - name: Commit & push if changed
@@ -36,8 +40,8 @@ jobs:
           if [ -n "$(git status --porcelain)" ]; then
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add data/softball.json
-            git commit -m "chore(softball): update softball.json ($(date -u +'%Y-%m-%d %H:%M:%SZ'))"
+            git add data/softball.json README.md
+            git commit -m "chore(softball): update schedules and README"
             git push
           else
             echo "No changes."
